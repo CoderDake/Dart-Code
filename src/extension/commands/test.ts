@@ -257,12 +257,19 @@ export class TestCommands implements vs.Disposable {
 		if (doc && isDartDocument(doc)) {
 			const filePath = fsPath(doc.uri);
 			const isTest = isTestFile(filePath);
-			const otherFile = isTest
-				? this.getImplementationFileForTest(filePath)
-				: this.getTestFileForImplementation(filePath);
+			const candidateFiles = isTest
+				? this.getCandidateImplementationFiles(filePath)
+				: this.getCandidateTestFiles(filePath);
 
-			if (!otherFile || (isTest && !fs.existsSync(otherFile)))
+			const otherFile = candidateFiles.find(fs.existsSync);
+
+			if (!otherFile)
 				return;
+
+			// TODO(dantup): If we didn't find the test file, do we prompt to create it or open
+			// the file picker?
+			// if (!otherFile || (isTest && !fs.existsSync(otherFile)))
+			// 	return;
 
 			let selectionOffset: number | undefined;
 			let selectionLength: number | undefined;
@@ -307,43 +314,58 @@ export class TestCommands implements vs.Disposable {
 			const filePath = fsPath(e.document.uri);
 			if (isTestFile(filePath)) {
 				// Implementation files must exist.
-				const implementationFilePath = this.getImplementationFileForTest(filePath);
+				const implementationFilePath = this.getCandidateImplementationFiles(filePath);
 				isInTestFileThatHasImplementation = !!implementationFilePath && fs.existsSync(implementationFilePath);
 			} else {
-				isInImplementationFileThatCanHaveTest = !!this.getTestFileForImplementation(filePath);
+				isInImplementationFileThatCanHaveTest = !!this.getCandidateTestFiles(filePath);
 			}
 		}
 
 		void vs.commands.executeCommand("setContext", CAN_JUMP_BETWEEN_TEST_IMPLEMENTATION, isInTestFileThatHasImplementation || isInImplementationFileThatCanHaveTest);
 	}
 
-	private getImplementationFileForTest(filePath: string) {
-		const pathSegments = filePath.split(path.sep);
+	private getCandidateImplementationFiles(filePath: string): string[] {
+		const candidates: string[] = [];
 
-		// Replace test folder with lib.
+		const pathSegments = filePath.split(path.sep);
 		const testFolderIndex = pathSegments.lastIndexOf("test");
-		if (testFolderIndex !== -1)
-			pathSegments[testFolderIndex] = "lib";
 
 		// Remove _test from the filename.
 		pathSegments[pathSegments.length - 1] = pathSegments[pathSegments.length - 1].replace(/_test\.dart/, ".dart");
 
-		return pathSegments.join(path.sep);
+		// Add a copy with test -> lib
+		if (testFolderIndex !== -1) {
+			const temp = [...pathSegments];
+			temp[testFolderIndex] = "lib";
+			candidates.push(temp.join(path.sep));
+		}
+
+		// Add the original path to support files alongside.
+		candidates.push(pathSegments.join(path.sep));
+
+		return candidates;
 	}
 
-	private getTestFileForImplementation(filePath: string) {
-		const pathSegments = filePath.split(path.sep);
+	private getCandidateTestFiles(filePath: string): string[] {
+		const candidates: string[] = [];
 
-		// Replace lib folder with test.
+		const pathSegments = filePath.split(path.sep);
 		const libFolderIndex = pathSegments.lastIndexOf("lib");
-		if (libFolderIndex === -1)
-			return undefined;
-		pathSegments[libFolderIndex] = "test";
 
 		// Add _test to the filename.
 		pathSegments[pathSegments.length - 1] = pathSegments[pathSegments.length - 1].replace(/\.dart/, "_test.dart");
 
-		return pathSegments.join(path.sep);
+		// Add a copy with lib -> test
+		if (libFolderIndex !== -1) {
+			const temp = [...pathSegments];
+			temp[libFolderIndex] = "test";
+			candidates.push(temp.join(path.sep));
+		}
+
+		// Add the original path to support files alongside.
+		candidates.push(pathSegments.join(path.sep));
+
+		return candidates;
 	}
 
 	public dispose(): any {
